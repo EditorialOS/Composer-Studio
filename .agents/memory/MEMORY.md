@@ -1,0 +1,1 @@
+- [Composer Studio MCP server](composer-mcp.md) — engine ported to api-server as stateless Streamable HTTP at POST /api/mcp; COMPOSER_MOCK=1 in shared env.
