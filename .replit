@@ -3,6 +3,13 @@ modules = ["nodejs-24"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
+run = ["node", "artifacts/api-server/dist/index.mjs"]
+build = ["pnpm", "--filter", "@workspace/api-server", "run", "build"]
+
+[deployment.env]
+PORT = "8080"
+NODE_ENV = "production"
+COMPOSER_MOCK = "1"
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
