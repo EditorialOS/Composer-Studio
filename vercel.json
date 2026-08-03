@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm --filter @workspace/api-server run build",
+  "framework": null,
+  "functions": {
+    "artifacts/api-server/dist/index.mjs": {
+      "runtime": "@vercel/node@5.x",
+      "maxDuration": 60
+    }
+  },
+  "routes": [
+    { "src": "/(.*)", "dest": "artifacts/api-server/dist/index.mjs" }
+  ],
+  "env": {
+    "COMPOSER_MOCK": "1",
+    "NODE_ENV": "production"
+  }
+}
