@@ -3,6 +3,7 @@
 // recommendation for the edition.
 
 import { isMockMode } from '../mock.js';
+import type { WorkspaceKeys } from './adapters/keys.js';
 import { searchAllAssetSources } from './assets.js';
 import { appendMemory, getEdition, saveEdition } from './store.js';
 import type {
@@ -147,6 +148,7 @@ async function uniqueEditionId(base: string): Promise<string> {
 export async function composeNewsletter(
   edition: string,
   orgId: string,
+  keys?: WorkspaceKeys,
 ): Promise<EditionPackage> {
   const startedAt = Date.now();
   const text = edition.trim();
@@ -170,7 +172,7 @@ export async function composeNewsletter(
 
   const stories: StoryPackage[] = await Promise.all(
     atoms.map(async (atom) => {
-      const result = await searchAllAssetSources(atom.searchQuery);
+      const result = await searchAllAssetSources(atom.searchQuery, keys);
       const ranked = [...result.assets].sort((a, b) => {
         const rank = (s: string) => (s === 'cleared' ? 0 : s === 'expiring' ? 1 : s === 'check' ? 2 : 3);
         const d = rank(a.rightsStatus) - rank(b.rightsStatus);

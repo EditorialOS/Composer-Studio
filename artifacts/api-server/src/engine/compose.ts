@@ -1,4 +1,5 @@
 import { getAdapters } from './adapters/index.js';
+import type { WorkspaceKeys } from './adapters/keys.js';
 import type {
   CapabilityNote,
   ComposeInput,
@@ -35,8 +36,9 @@ async function uniquePackageId(base: string): Promise<string> {
 export async function composePackage(
   input: ComposeInput,
   orgId: string,
+  keys?: WorkspaceKeys,
 ): Promise<ComposerPackage> {
-  const adapters = getAdapters();
+  const adapters = getAdapters(keys);
   const startedAt = Date.now();
 
   const parsed = await adapters.llm.parseBrief(input);

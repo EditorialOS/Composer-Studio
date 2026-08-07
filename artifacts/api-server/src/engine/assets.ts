@@ -4,6 +4,7 @@
 
 import { isMockMode } from '../mock.js';
 import { getAdapters } from './adapters/index.js';
+import type { WorkspaceKeys } from './adapters/keys.js';
 import { findMockAssetById, keywords, searchMockLibraryByTags } from './adapters/mock/index.js';
 import { DRIVE_FILENAMES } from './fixtures/shared.js';
 import type {
@@ -71,8 +72,8 @@ function mockBynderSource(): SourceHit {
   };
 }
 
-async function realLibrarySource(query: string): Promise<SourceHit> {
-  const adapters = getAdapters();
+async function realLibrarySource(query: string, keys?: WorkspaceKeys): Promise<SourceHit> {
+  const adapters = getAdapters(keys);
   const parsed: ParsedBrief = {
     headline: query,
     subhead: 'asset quick-hit',
@@ -101,14 +102,14 @@ async function realLibrarySource(query: string): Promise<SourceHit> {
   };
 }
 
-export async function searchAllAssetSources(query: string): Promise<AssetSearchResult> {
-  const adapters = getAdapters();
+export async function searchAllAssetSources(query: string, keys?: WorkspaceKeys): Promise<AssetSearchResult> {
+  const adapters = getAdapters(keys);
   const trimmed = query.trim();
 
   const hits: SourceHit[] = isMockMode()
     ? [mockCloudinarySource(trimmed), mockDriveSource(trimmed), mockBynderSource()]
     : [
-        await realLibrarySource(trimmed),
+        await realLibrarySource(trimmed, keys),
         { report: { source: 'Google Drive', status: 'not-connected', matchCount: 0, note: 'Drive connector not yet wired.' }, assets: [] },
         { report: { source: 'Bynder', status: 'not-connected', matchCount: 0, note: 'DAM MCP connector not yet wired.' }, assets: [] },
       ];
@@ -132,8 +133,8 @@ export async function searchAllAssetSources(query: string): Promise<AssetSearchR
   };
 }
 
-export async function checkAssetRights(assetId: string): Promise<RightsCheckResult> {
-  const adapters = getAdapters();
+export async function checkAssetRights(assetId: string, keys?: WorkspaceKeys): Promise<RightsCheckResult> {
+  const adapters = getAdapters(keys);
   const id = assetId.trim();
 
   if (isMockMode()) {
