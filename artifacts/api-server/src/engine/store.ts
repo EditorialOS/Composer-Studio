@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { desc, eq } from 'drizzle-orm';
 import { isMockMode } from '../mock.js';
+import { loadDb, pgEnabled } from './db.js';
 import { DEFAULT_WORKSPACE, FIXTURE_BRIEFS } from './fixtures/shared.js';
 import type {
   ComposerPackage,
@@ -12,22 +13,10 @@ import type {
 } from './types.js';
 
 // ── Backend selection ────────────────────────────────────────
-// Real mode + DATABASE_URL → durable Postgres (@workspace/db).
-// Everything else (mock mode, or real mode with no DB provisioned) →
-// the in-memory/file store below, which degrades honestly: on serverless
-// filesystems it simply stays in-memory for the instance's lifetime.
-
-function pgEnabled(): boolean {
-  return !isMockMode() && Boolean(process.env['DATABASE_URL']);
-}
-
-// The DB module throws at import time if DATABASE_URL is unset, so it is
-// imported lazily — only when a database is actually configured.
-type DbModule = typeof import('@workspace/db');
-let dbModPromise: Promise<DbModule> | null = null;
-function loadDb(): Promise<DbModule> {
-  return (dbModPromise ??= import('@workspace/db'));
-}
+// Real mode + DATABASE_URL → durable Postgres (@workspace/db); everything
+// else (mock mode, or real mode with no DB provisioned) → the in-memory /
+// file store below, which degrades honestly: on serverless filesystems it
+// simply stays in-memory for the instance's lifetime. See ./db.ts.
 
 // ── In-memory / file fallback ────────────────────────────────
 

@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { isMockMode, MOCK_WORKSPACE } from '../mock.js';
+import { resolveOrgForKey } from '../engine/apikeys.js';
 import {
   MCP_TOOL_DESCRIPTORS,
   toolCheckRights,
@@ -27,9 +28,12 @@ async function authenticate(req: Request): Promise<{ orgId: string } | null> {
     return { orgId: MOCK_WORKSPACE.orgId };
   }
 
-  // Real mode: compare against the shared COMPOSER_API_KEY env var.
-  // Per-customer key storage (Supabase SHA-256 hashes) can be wired here
-  // by following the mcp-keys pattern from the Next.js reference impl.
+  // Real mode: per-customer API keys (SHA-256 hashes in Postgres) take
+  // precedence, so the same minted key works across REST and MCP.
+  const orgFromDb = await resolveOrgForKey(token);
+  if (orgFromDb) return { orgId: orgFromDb };
+
+  // Fall back to the shared COMPOSER_API_KEY env var (admin / back-compat).
   const expected = process.env['COMPOSER_API_KEY'];
   if (expected && token === expected) {
     return { orgId: process.env['COMPOSER_MCP_ORG_ID'] ?? 'mcp-customer' };
