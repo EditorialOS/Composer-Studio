@@ -1,12 +1,11 @@
-// Editorial Director gate, backed by Claude. Called only when an Anthropic
-// key is configured (per-workspace or env); every failure path returns null
-// so the caller falls back to the heuristic evaluation. Uses the Messages
-// API over fetch — consistent with the other real adapters (Cloudinary,
-// Serper, Brave), which are all SDK-free.
+// Editorial Director gate, backed by Claude via the official Anthropic SDK.
+// Called only when an Anthropic key is configured (per-workspace or env);
+// every failure path returns null so the caller falls back to the heuristic
+// evaluation.
 
+import Anthropic from '@anthropic-ai/sdk';
 import { GATE_NAMES, type GateEvaluation, type GateName, type GateStatus, type ParsedBrief, type WorkspaceContextData } from './types.js';
 
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const DEFAULT_MODEL = 'claude-opus-5';
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -45,7 +44,7 @@ const GATE_SCHEMA = {
     editorNote: { type: 'string' },
   },
   required: ['gates', 'verdictSummary', 'requiredRevisions', 'editorNote'],
-} as const;
+};
 
 const SYSTEM_PROMPT = `You are the Editorial Director of a newsroom's content studio. A brief has been submitted for a content package. Evaluate it against exactly five gates, in this order:
 
@@ -86,49 +85,28 @@ export async function evaluateGatesWithClaude(
     },
   };
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let res: Response;
+  const client = new Anthropic({ apiKey: cfg.apiKey });
+  let response: Anthropic.Message;
   try {
-    res = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': cfg.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
+    response = await client.messages.create(
+      {
         model: cfg.model,
         max_tokens: 4096,
         thinking: { type: 'adaptive' },
         output_config: { effort: 'medium', format: { type: 'json_schema', schema: GATE_SCHEMA } },
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: JSON.stringify(userPayload) }],
-      }),
-    });
+      },
+      { timeout: REQUEST_TIMEOUT_MS },
+    );
   } catch {
-    return null; // network error or timeout
-  } finally {
-    clearTimeout(timer);
+    return null; // network error, timeout, non-2xx, etc.
   }
 
-  if (!res.ok) return null;
+  if (response.stop_reason === 'refusal') return null;
 
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    return null;
-  }
-
-  const b = body as { stop_reason?: string; content?: Array<{ type?: string; text?: string }> };
-  if (b.stop_reason === 'refusal') return null;
-
-  const textBlock = Array.isArray(b.content)
-    ? b.content.find((blk) => blk?.type === 'text' && typeof blk.text === 'string')
-    : undefined;
-  if (!textBlock?.text) return null;
+  const textBlock = response.content.find((blk) => blk.type === 'text');
+  if (!textBlock || textBlock.type !== 'text' || !textBlock.text) return null;
 
   let parsedOut: { gates?: RawGate[]; verdictSummary?: unknown; requiredRevisions?: unknown; editorNote?: unknown };
   try {
