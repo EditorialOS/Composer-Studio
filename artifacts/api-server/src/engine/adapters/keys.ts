@@ -14,6 +14,8 @@ export interface WorkspaceKeys {
   beehiivApiKey?: string;
   beehiivPublicationId?: string;
   cmsWebhookUrl?: string;
+  anthropicApiKey?: string;
+  anthropicModel?: string;
 }
 
 export const NO_KEYS: WorkspaceKeys = {};
@@ -35,6 +37,8 @@ export function keysFromBody(body: unknown): WorkspaceKeys {
     beehiivApiKey: clean(b['beehiivApiKey']),
     beehiivPublicationId: clean(b['beehiivPublicationId']),
     cmsWebhookUrl: clean(b['cmsWebhookUrl']),
+    anthropicApiKey: clean(b['anthropicApiKey']),
+    anthropicModel: clean(b['anthropicModel']),
   };
 }
 
@@ -50,5 +54,7 @@ export function keysFromHeaders(req: Request): WorkspaceKeys {
     beehiivApiKey: h('x-composer-key-beehiiv'),
     beehiivPublicationId: h('x-composer-key-beehiiv-pub'),
     cmsWebhookUrl: h('x-composer-key-cms-webhook'),
+    anthropicApiKey: h('x-composer-key-anthropic'),
+    anthropicModel: h('x-composer-key-anthropic-model'),
   };
 }

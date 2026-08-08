@@ -24,6 +24,7 @@ import type {
   WorkspaceContextData,
 } from '../../types.js';
 import { buildDerivatives, cloudinaryTransform } from '../../derivatives.js';
+import { evaluateGatesWithClaude, resolveLlm } from '../../llm.js';
 import type { WorkspaceKeys } from '../keys.js';
 
 // ── Shared helpers ───────────────────────────────────────────
@@ -470,10 +471,12 @@ const BREAKING_RE =
   /\b(breaking|urgent|just in|developing|alert|earthquake|tsunami|crash|killed|dies|attack)\b/i;
 
 export class RealModelAdapter implements ModelAdapter {
-  name = 'heuristic-editorial-director';
+  name = 'editorial-director';
+
+  constructor(private keys: WorkspaceKeys = {}) {}
 
   async capabilities() {
-    return { gateEval: true, provider: 'heuristic' };
+    return { gateEval: true, provider: resolveLlm(this.keys) ? 'anthropic' : 'heuristic' };
   }
 
   async parseBrief(input: ComposeInput): Promise<ParsedBrief> {
@@ -495,13 +498,26 @@ export class RealModelAdapter implements ModelAdapter {
     };
   }
 
-  async evaluateGates({
+  async evaluateGates(args: {
+    parsed: ParsedBrief;
+    workspace: WorkspaceContextData;
+  }): Promise<GateEvaluation> {
+    const cfg = resolveLlm(this.keys);
+    if (cfg) {
+      const viaLlm = await evaluateGatesWithClaude(args.parsed, args.workspace, cfg);
+      if (viaLlm) return viaLlm;
+      // fall through to heuristic on any LLM failure (network, refusal, bad output)
+    }
+    return this.heuristicGates(args);
+  }
+
+  private heuristicGates({
     parsed,
     workspace,
   }: {
     parsed: ParsedBrief;
     workspace: WorkspaceContextData;
-  }): Promise<GateEvaluation> {
+  }): GateEvaluation {
     const briefText = `${parsed.headline} ${parsed.searchTags.join(' ')}`.toLowerCase();
     const themeMatch = workspace.activeThemes.find((t) =>
       t.toLowerCase().split(/\s+/).some((w) => w.length > 3 && briefText.includes(w)),

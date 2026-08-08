@@ -68,6 +68,6 @@ export function getAdapters(keys: WorkspaceKeys = NO_KEYS): ComposerAdapters {
     archive: new RealArchiveAdapter(),
     rights: new RealRightsAdapter(),
     send: sendConfigured ? new RealSendAdapter(keys) : new MockSendAdapter(),
-    llm: new RealModelAdapter(),
+    llm: new RealModelAdapter(keys),
   };
 }
