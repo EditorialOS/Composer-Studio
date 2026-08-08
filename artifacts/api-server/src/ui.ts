@@ -113,6 +113,28 @@ export const STUDIO_HTML = `<!doctype html>
     <p class="hint">One brief in. The engine runs the editorial gate, finds assets, and pulls market context.</p>
     <label for="key">API key</label>
     <input type="text" id="key" value="demo" spellcheck="false" />
+    <details class="conn">
+      <summary>Connections &mdash; use your own accounts (optional)</summary>
+      <p class="hint" style="margin:10px 0 4px">Stored only in this browser and sent with each request. Leave blank to use demo data. Get free keys from cloudinary.com, serper.dev, and beehiiv.</p>
+      <label for="ck_anthropicApiKey">Anthropic API key &mdash; AI editorial gate</label>
+      <input type="text" id="ck_anthropicApiKey" spellcheck="false" placeholder="sk-ant-… (already set on the server)" />
+      <label for="ck_cloudinaryCloudName">Cloudinary cloud name</label>
+      <input type="text" id="ck_cloudinaryCloudName" spellcheck="false" />
+      <label for="ck_cloudinaryApiKey">Cloudinary API key</label>
+      <input type="text" id="ck_cloudinaryApiKey" spellcheck="false" />
+      <label for="ck_cloudinaryApiSecret">Cloudinary API secret</label>
+      <input type="text" id="ck_cloudinaryApiSecret" spellcheck="false" />
+      <label for="ck_serperApiKey">Serper API key &mdash; market search</label>
+      <input type="text" id="ck_serperApiKey" spellcheck="false" />
+      <label for="ck_braveApiKey">Brave Search API key &mdash; alternative to Serper</label>
+      <input type="text" id="ck_braveApiKey" spellcheck="false" />
+      <label for="ck_beehiivApiKey">beehiiv API key</label>
+      <input type="text" id="ck_beehiivApiKey" spellcheck="false" />
+      <label for="ck_beehiivPublicationId">beehiiv publication ID</label>
+      <input type="text" id="ck_beehiivPublicationId" spellcheck="false" />
+      <label for="ck_cmsWebhookUrl">CMS webhook URL</label>
+      <input type="text" id="ck_cmsWebhookUrl" spellcheck="false" />
+    </details>
     <label for="brief">Story brief</label>
     <textarea id="brief" placeholder="e.g. Breaking: 6.8 earthquake off the coast of Chile, tsunami watch issued">Breaking: 6.8 earthquake off the coast of Chile, tsunami watch issued</textarea>
     <label>Platforms</label>
@@ -136,6 +158,14 @@ export const STUDIO_HTML = `<!doctype html>
     pc.appendChild(el);
   });
   function key(){return document.getElementById("key").value.trim()||"demo"}
+  var CK=["anthropicApiKey","cloudinaryCloudName","cloudinaryApiKey","cloudinaryApiSecret","serperApiKey","braveApiKey","beehiivApiKey","beehiivPublicationId","cmsWebhookUrl"];
+  (function restore(){
+    var k=localStorage.getItem("composer_key"); if(k){document.getElementById("key").value=k;}
+    CK.forEach(function(name){ var v=localStorage.getItem("composer_ck_"+name); var el=document.getElementById("ck_"+name); if(v&&el) el.value=v; });
+  })();
+  document.getElementById("key").addEventListener("input",function(){localStorage.setItem("composer_key",document.getElementById("key").value.trim());});
+  CK.forEach(function(name){ var el=document.getElementById("ck_"+name); if(el) el.addEventListener("input",function(){localStorage.setItem("composer_ck_"+name,el.value.trim());}); });
+  function keysObj(){ var o={}; CK.forEach(function(name){ var el=document.getElementById("ck_"+name); var v=el?el.value.trim():""; if(v) o[name]=v; }); return o; }
   function esc(s){var d=document.createElement("div");d.textContent=s==null?"":String(s);return d.innerHTML}
   function api(path,opts){
     opts=opts||{};
@@ -213,7 +243,7 @@ export const STUDIO_HTML = `<!doctype html>
     go.disabled=true;go.innerHTML='<span class="spin"></span>Composing…';
     res.innerHTML='<div class="empty">Running the editorial gate, asset search, and market scan…</div>';
     api("/compose",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({brief:brief,platforms:plats.length?plats:["Newsletter"],archiveDepth:document.getElementById("depth").value})})
+      body:JSON.stringify({brief:brief,platforms:plats.length?plats:["Newsletter"],archiveDepth:document.getElementById("depth").value,keys:keysObj()})})
     .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
     .then(function(o){ if(!o.ok){res.innerHTML='<div class="err">'+esc((o.j&&o.j.message)||"Request failed")+'</div>';} else {render(o.j);} })
     .catch(function(err){res.innerHTML='<div class="err">'+esc(String(err))+'</div>';})
