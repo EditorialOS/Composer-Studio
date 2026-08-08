@@ -29,7 +29,7 @@ const DESTINATIONS: readonly SendDestination[] = ['beehiiv', 'cms', 'download'];
 
 // ── Auth ─────────────────────────────────────────────────────
 
-interface AuthResult {
+export interface AuthResult {
   orgId: string;
   key: string;
 }
@@ -42,7 +42,7 @@ interface AuthResult {
  *   4. no DB and no shared key configured — permissive local dev: any key.
  * A configured database means unknown keys are rejected (real multi-tenant).
  */
-async function authenticate(req: Request): Promise<AuthResult | null> {
+export async function authenticate(req: Request): Promise<AuthResult | null> {
   const header = req.headers['authorization'] ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(String(header).trim());
   const key = match?.[1]?.trim();

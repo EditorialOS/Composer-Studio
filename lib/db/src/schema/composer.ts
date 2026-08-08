@@ -83,3 +83,16 @@ export const composerApiKeys = pgTable(
     index("composer_api_keys_org_idx").on(t.orgId),
   ],
 );
+
+// Billing subscriptions, one row per org (tenant). This is the scaffold the
+// Stripe integration writes to; until Stripe is wired every org is implicitly
+// on the free plan (no row).
+export const composerSubscriptions = pgTable("composer_subscriptions", {
+  orgId: text("org_id").primaryKey(),
+  plan: text("plan").notNull().default("free"),
+  status: text("status").notNull().default("none"),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
