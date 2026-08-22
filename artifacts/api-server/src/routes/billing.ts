@@ -7,7 +7,7 @@
 // router at "/api", so these resolve as /api/billing/*.
 
 import { Router, type Request, type Response } from 'express';
-import { authenticate } from './rest.js';
+import { authenticate } from '../engine/auth.js';
 import { getPlan, getSubscription, PLANS, stripeConfigured } from '../engine/billing.js';
 
 const router = Router();

@@ -9,63 +9,33 @@
 
 import { Router, type Request, type Response } from 'express';
 import { isMockMode } from '../mock.js';
-import { resolveOrgForKey } from '../engine/apikeys.js';
+import { authenticate, type AuthResult } from '../engine/auth.js';
 import { getAdapters } from '../engine/adapters/index.js';
 import { keysFromBody, type WorkspaceKeys } from '../engine/adapters/keys.js';
 import { composePackage } from '../engine/compose.js';
 import { checkAssetRights, searchAllAssetSources } from '../engine/assets.js';
 import { composeNewsletter } from '../engine/newsletter.js';
 import { getPackage, listPackages, recordSend } from '../engine/store.js';
+import { getPlan, getSubscription, PLANS } from '../engine/billing.js';
 import type { ArchiveDepth, SendDestination, SendRecord } from '../engine/types.js';
 
 const router = Router();
 
 // ── Config ───────────────────────────────────────────────────
 
-const RPM = Number(process.env['RATE_LIMIT_RPM']) || 60;
-const COMPOSES_PER_DAY = Number(process.env['COMPOSES_PER_DAY']) || 200;
+const DEFAULT_RPM = Number(process.env['RATE_LIMIT_RPM']) || 60;
+const DEFAULT_COMPOSES_PER_DAY = Number(process.env['COMPOSES_PER_DAY']) || 200;
 const ARCHIVE_DEPTHS: readonly ArchiveDepth[] = ['shallow', 'standard', 'deep'];
 const DESTINATIONS: readonly SendDestination[] = ['beehiiv', 'cms', 'download'];
 
-// ── Auth ─────────────────────────────────────────────────────
-
-export interface AuthResult {
-  orgId: string;
-  key: string;
-}
-
-/**
- * Resolve a request to a tenant, in priority order:
- *   1. mock mode — any non-empty key maps to a per-key demo org.
- *   2. a minted, non-revoked API key in the database → its org.
- *   3. the shared COMPOSER_API_KEY (admin / back-compat) → admin org.
- *   4. no DB and no shared key configured — permissive local dev: any key.
- * A configured database means unknown keys are rejected (real multi-tenant).
- */
-export async function authenticate(req: Request): Promise<AuthResult | null> {
-  const header = req.headers['authorization'] ?? '';
-  const match = /^Bearer\s+(.+)$/i.exec(String(header).trim());
-  const key = match?.[1]?.trim();
-  if (!key) return null;
-
-  if (isMockMode()) return { orgId: `org-${key.slice(0, 12)}`, key };
-
-  const orgFromDb = await resolveOrgForKey(key);
-  if (orgFromDb) return { orgId: orgFromDb, key };
-
-  const expected = process.env['COMPOSER_API_KEY'];
-  if (expected) {
-    return key === expected
-      ? { orgId: process.env['COMPOSER_ADMIN_ORG_ID'] ?? 'org-admin', key }
-      : null;
-  }
-
-  // No shared key set. With a DB provisioned, only minted keys are valid.
-  if (process.env['DATABASE_URL']) return null;
-
-  // Pure local dev (no DB, no shared key): stay permissive.
-  return { orgId: `org-${key.slice(0, 12)}`, key };
-}
+// Input size guards — prevent abuse and unexpected LLM costs.
+const LIMITS = {
+  brief: 10_000,
+  edition: 100_000,
+  query: 1_000,
+  assetId: 500,
+  packageId: 200,
+} as const;
 
 function unauthorized(res: Response): void {
   res.status(401).json({
@@ -104,18 +74,30 @@ function bucketFor(key: string): Bucket {
 }
 
 /** Per-minute request limit. Returns false (and responds 429) when exceeded. */
-function underRequestLimit(key: string, res: Response): boolean {
+function underRequestLimit(key: string, res: Response, rpm: number): boolean {
   const b = bucketFor(key);
   b.count += 1;
-  if (b.count > RPM) {
+  if (b.count > rpm) {
     res.status(429).json({
       error: 'rate_limited',
-      message: `Rate limit exceeded — ${RPM} requests/min.`,
-      limit: RPM,
+      message: `Rate limit exceeded — ${rpm} requests/min.`,
+      limit: rpm,
     });
     return false;
   }
   return true;
+}
+
+async function limitsForOrg(orgId: string): Promise<{ rpm: number; composesPerDay: number }> {
+  if (isMockMode()) {
+    return { rpm: DEFAULT_RPM, composesPerDay: DEFAULT_COMPOSES_PER_DAY };
+  }
+  const subscription = await getSubscription(orgId);
+  const plan = getPlan(subscription.plan);
+  if (!plan) {
+    return { rpm: DEFAULT_RPM, composesPerDay: DEFAULT_COMPOSES_PER_DAY };
+  }
+  return { rpm: plan.requestsPerMinute, composesPerDay: plan.composesPerDay };
 }
 
 // ── Handler wrapper (auth + rate limit + error handling) ─────
@@ -129,7 +111,8 @@ function guarded(handler: GuardedHandler) {
       unauthorized(res);
       return;
     }
-    if (!underRequestLimit(auth.key, res)) return;
+    const limits = await limitsForOrg(auth.orgId);
+    if (!underRequestLimit(auth.key, res, limits.rpm)) return;
     try {
       await handler(req, res, auth);
     } catch (err) {
@@ -149,18 +132,23 @@ function body(req: Request): Record<string, unknown> {
   return (req.body ?? {}) as Record<string, unknown>;
 }
 
+function tooLong(res: Response, field: string, max: number): void {
+  res.status(400).json({ error: 'bad_request', message: `${field} must not exceed ${max} characters.` });
+}
+
 // ── Routes ───────────────────────────────────────────────────
 
 router.get(
   '/capabilities',
-  guarded(async (req, res) => {
+  guarded(async (req, res, auth) => {
     const adapters = getAdapters(engineKeys(req));
-    const [webSearch, imageLibrary, archive, send, llm] = await Promise.all([
+    const [webSearch, imageLibrary, archive, send, llm, limits] = await Promise.all([
       adapters.webSearch.capabilities(),
       adapters.imageLibrary.capabilities(),
       adapters.archive.capabilities(),
       adapters.send.capabilities(),
       adapters.llm.capabilities(),
+      limitsForOrg(auth.orgId),
     ]);
     res.json({
       mode: isMockMode() ? 'mock' : 'real',
@@ -169,7 +157,8 @@ router.get(
       archive: { name: adapters.archive.name, ...archive },
       send: { name: adapters.send.name, ...send },
       llm: { name: adapters.llm.name, ...llm },
-      rateLimit: { rpm: RPM, composesPerDay: COMPOSES_PER_DAY },
+      rateLimit: { rpm: limits.rpm, composesPerDay: limits.composesPerDay },
+      plans: PLANS,
     });
   }),
 );
@@ -183,6 +172,10 @@ router.post(
       res.status(400).json({ error: 'bad_request', message: 'brief is required.' });
       return;
     }
+    if (brief.length > LIMITS.brief) {
+      tooLong(res, 'brief', LIMITS.brief);
+      return;
+    }
     const platforms =
       Array.isArray(b['platforms']) && b['platforms'].length > 0
         ? (b['platforms'] as unknown[]).filter((p): p is string => typeof p === 'string')
@@ -193,15 +186,16 @@ router.post(
       : 'standard';
 
     // Per-day compose limit — count and expose on every compose response.
+    const limits = await limitsForOrg(auth.orgId);
     const bucket = bucketFor(auth.key);
     bucket.composeCount += 1;
     res.setHeader('X-Compose-Count', String(bucket.composeCount));
-    res.setHeader('X-Compose-Limit', String(COMPOSES_PER_DAY));
-    if (bucket.composeCount > COMPOSES_PER_DAY) {
+    res.setHeader('X-Compose-Limit', String(limits.composesPerDay));
+    if (bucket.composeCount > limits.composesPerDay) {
       res.status(429).json({
         error: 'rate_limited',
-        message: `Daily compose limit reached — ${COMPOSES_PER_DAY}/day.`,
-        limit: COMPOSES_PER_DAY,
+        message: `Daily compose limit reached — ${limits.composesPerDay}/day.`,
+        limit: limits.composesPerDay,
       });
       return;
     }
@@ -220,6 +214,10 @@ router.post(
   guarded(async (req, res) => {
     const b = body(req);
     const query = typeof b['query'] === 'string' ? b['query'] : '';
+    if (query.length > LIMITS.query) {
+      tooLong(res, 'query', LIMITS.query);
+      return;
+    }
     res.json(await searchAllAssetSources(query, engineKeys(req)));
   }),
 );
@@ -229,6 +227,10 @@ router.post(
   guarded(async (req, res) => {
     const b = body(req);
     const assetId = typeof b['asset_id'] === 'string' ? b['asset_id'] : '';
+    if (assetId.length > LIMITS.assetId) {
+      tooLong(res, 'asset_id', LIMITS.assetId);
+      return;
+    }
     res.json(await checkAssetRights(assetId, engineKeys(req)));
   }),
 );
@@ -242,6 +244,10 @@ router.post(
       res.status(400).json({ error: 'bad_request', message: 'edition is required.' });
       return;
     }
+    if (edition.length > LIMITS.edition) {
+      tooLong(res, 'edition', LIMITS.edition);
+      return;
+    }
     res.json(await composeNewsletter(edition, auth.orgId, engineKeys(req)));
   }),
 );
@@ -251,6 +257,10 @@ router.post(
   guarded(async (req, res) => {
     const b = body(req);
     const packageId = typeof b['package_id'] === 'string' ? b['package_id'] : '';
+    if (packageId.length > LIMITS.packageId) {
+      tooLong(res, 'package_id', LIMITS.packageId);
+      return;
+    }
     const destination = typeof b['destination'] === 'string' ? b['destination'] : '';
 
     const pkg = await getPackage(packageId);
@@ -290,6 +300,10 @@ router.get(
   '/packages/:id',
   guarded(async (req, res) => {
     const id = String(req.params['id'] ?? '');
+    if (id.length > LIMITS.packageId) {
+      tooLong(res, 'package id', LIMITS.packageId);
+      return;
+    }
     const pkg = await getPackage(id);
     if (!pkg) {
       res.status(404).json({ error: 'not_found', message: `No package "${id}".` });

@@ -156,7 +156,10 @@ export class RealAssetAdapter implements AssetAdapter {
     params.append('with_field', 'metadata');
     const url = `https://api.cloudinary.com/v1_1/${cfg.cloud}/resources/search?${params.toString()}`;
     try {
-      const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+      const res = await fetch(url, {
+        headers: { Authorization: `Basic ${auth}` },
+        signal: AbortSignal.timeout(15_000),
+      });
       if (!res.ok) return [];
       const data = (await res.json()) as { resources?: unknown[] };
       const resources = Array.isArray(data.resources) ? data.resources : [];
@@ -214,6 +217,7 @@ export class RealSearchAdapter implements SearchAdapter {
       method: 'POST',
       headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ q: query, num: 10 }),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new Error(`serper HTTP ${res.status}`);
     const data = (await res.json()) as { organic?: Array<{ title?: string; link?: string; snippet?: string }> };
@@ -226,6 +230,7 @@ export class RealSearchAdapter implements SearchAdapter {
     const params = new URLSearchParams({ q: query, count: '10' });
     const res = await fetch(`https://api.search.brave.com/res/v1/web/search?${params.toString()}`, {
       headers: { 'X-Subscription-Token': key, Accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new Error(`brave HTTP ${res.status}`);
     const data = (await res.json()) as {
@@ -404,6 +409,7 @@ export class RealSendAdapter implements SendAdapter {
             status: 'draft',
             content: { free: { web: this.buildHtml(pkg) } },
           }),
+          signal: AbortSignal.timeout(15_000),
         });
         if (!res.ok) {
           return { destination, status: 'skipped', note: `beehiiv draft failed — HTTP ${res.status}.` };
@@ -435,6 +441,7 @@ export class RealSendAdapter implements SendAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pkg),
+        signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) {
         return { destination, status: 'skipped', note: `CMS webhook failed — HTTP ${res.status}.` };

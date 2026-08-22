@@ -6,7 +6,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { GATE_NAMES, type GateEvaluation, type GateName, type GateStatus, type ParsedBrief, type WorkspaceContextData } from './types.js';
 
-const DEFAULT_MODEL = 'claude-opus-5';
+const DEFAULT_MODEL = 'claude-3-5-sonnet-20241022';
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export interface LlmConfig {
@@ -54,7 +54,10 @@ const SYSTEM_PROMPT = `You are the Editorial Director of a newsroom's content st
 4. "Production reality" — is the scope realistic for the team's capacity?
 5. "Calendar fit" — does it avoid clashing with scheduled items?
 
-For each gate return status "pass", "warn", or "fail" and a one-sentence, specific note grounded in the workspace context you are given (name the theme, the overlapping coverage item, or the calendar clash where relevant). Then write a one-sentence verdictSummary, a short list of concrete requiredRevisions (empty if every gate passes), and a brief editorNote. Be a rigorous gatekeeper: warn or fail when the brief does not clearly earn a slot. Respond only with the structured object.`;
+For each gate return status "pass", "warn", or "fail" and a one-sentence, specific note grounded in the workspace context you are given (name the theme, the overlapping coverage item, or the calendar clash where relevant). Then write a one-sentence verdictSummary, a short list of concrete requiredRevisions (empty if every gate passes), and a brief editorNote. Be a rigorous gatekeeper: warn or fail when the brief does not clearly earn a slot.
+
+Respond ONLY with a single JSON object matching this JSON Schema, and no markdown formatting:
+${JSON.stringify(GATE_SCHEMA, null, 2)}`;
 
 interface RawGate {
   gate?: unknown;
@@ -64,6 +67,13 @@ interface RawGate {
 
 function coerceStatus(v: unknown): GateStatus {
   return v === 'pass' || v === 'warn' || v === 'fail' ? v : 'warn';
+}
+
+function stripJsonFences(text: string): string {
+  return text
+    .replace(/^\s*```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
 }
 
 /**
@@ -92,8 +102,6 @@ export async function evaluateGatesWithClaude(
       {
         model: cfg.model,
         max_tokens: 4096,
-        thinking: { type: 'adaptive' },
-        output_config: { effort: 'medium', format: { type: 'json_schema', schema: GATE_SCHEMA } },
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: JSON.stringify(userPayload) }],
       },
@@ -110,7 +118,7 @@ export async function evaluateGatesWithClaude(
 
   let parsedOut: { gates?: RawGate[]; verdictSummary?: unknown; requiredRevisions?: unknown; editorNote?: unknown };
   try {
-    parsedOut = JSON.parse(textBlock.text);
+    parsedOut = JSON.parse(stripJsonFences(textBlock.text));
   } catch {
     return null;
   }

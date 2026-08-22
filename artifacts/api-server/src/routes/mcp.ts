@@ -1,9 +1,9 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type Response } from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { isMockMode, MOCK_WORKSPACE } from '../mock.js';
-import { resolveOrgForKey } from '../engine/apikeys.js';
+import { isMockMode } from '../mock.js';
+import { authenticate } from '../engine/auth.js';
 import {
   MCP_TOOL_DESCRIPTORS,
   toolCheckRights,
@@ -14,32 +14,6 @@ import {
 } from '../engine/mcp.js';
 
 const router = Router();
-
-// ── Auth ─────────────────────────────────────────────────────
-
-async function authenticate(req: Request): Promise<{ orgId: string } | null> {
-  const header = req.headers['authorization'] ?? '';
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  const token = match?.[1]?.trim();
-  if (!token) return null;
-
-  // Mock mode: any non-empty key resolves the demo org.
-  if (isMockMode()) {
-    return { orgId: MOCK_WORKSPACE.orgId };
-  }
-
-  // Real mode: per-customer API keys (SHA-256 hashes in Postgres) take
-  // precedence, so the same minted key works across REST and MCP.
-  const orgFromDb = await resolveOrgForKey(token);
-  if (orgFromDb) return { orgId: orgFromDb };
-
-  // Fall back to the shared COMPOSER_API_KEY env var (admin / back-compat).
-  const expected = process.env['COMPOSER_API_KEY'];
-  if (expected && token === expected) {
-    return { orgId: process.env['COMPOSER_MCP_ORG_ID'] ?? 'mcp-customer' };
-  }
-  return null;
-}
 
 function unauthorized(res: Response): void {
   res.status(401).json({
